@@ -1,11 +1,12 @@
-﻿生成启动时间为 2014/8/15 17:03:51。
+﻿生成启动时间为 2014/8/18 16:32:48。
      1>项目“F:\github\gitWinFTPClient\gitWinFTPClient\gitWinFTPClient.vcxproj”在节点 2 上(build 个目标)。
      1>InitializeBuildStatus:
-         正在对“Debug\gitWinFTPClient.unsuccessfulbuild”执行 Touch 任务。
+         正在创建“Debug\gitWinFTPClient.unsuccessfulbuild”，因为已指定“AlwaysCreate”。
        ClCompile:
          所有输出均为最新。
          C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\CL.exe /c /ZI /nologo /W3 /WX- /Od /Oy- /D WIN32 /D _DEBUG /D _CONSOLE /D _UNICODE /D UNICODE /Gm /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Yu"StdAfx.h" /Fp"Debug\gitWinFTPClient.pch" /Fo"Debug\\" /Fd"Debug\vc100.pdb" /Gd /TP /analyze- /errorReport:prompt gitWinFTPClient.cpp
          gitWinFTPClient.cpp
+     1>f:\github\gitwinftpclient\gitwinftpclient\gitwinftpclient.cpp(201): warning C4244: “=”: 从“long”转换到“BYTE”，可能丢失数据
        ManifestResourceCompile:
          所有输出均为最新。
        Link:
@@ -25,4 +26,4 @@
 
 生成成功。
 
-已用时间 00:00:01.57
+已用时间 00:00:01.61

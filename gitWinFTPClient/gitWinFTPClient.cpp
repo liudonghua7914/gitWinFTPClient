@@ -6,19 +6,35 @@
 #include<stdio.h> 
 #pragma comment(lib,"ws2_32.lib")
 
-#define  CMD_USER	"USER \r\n"
+#define  CMD_USER	"USER fly\r\n"
 #define  CMD_PASS	"PASS \r\n"
 #define	 CMD_PORT	"PROT 192.168.8.209 212,29\r\n"	//"PORT \r\n"
 #define  CMD_LIST	"LIST \r\n"
 #define  CMD_PWD	"PWD \r\n"
+#define  CMD_SYST	"SYST \r\n"
+#define  CMD_FEAT	"FEAT \r\n"
+#define  CMD_TYPE	"TYPE A \r\n"
+#define  CMD_PASV	"PASV \r\n"
+#define  CMD_MLSD	"MLSD \r\n"
+
+
+#define FTP_PASV	0
+#define FTP_PORT	1
+
+#define	FTP_WHAT	FTP_PASV
 
 enum FTP_STATUS
 {
 	eSTAT = 0,
 	eUSER,
 	ePASS,
-	eLOGIN,
+	eSYST,
+	eFEAT,
 	ePWD,
+	eTYPE,
+	ePASV,
+	eMLSD,
+	eLOGIN,
 	ePORT,
 	eLIST,
 	eMAX
@@ -33,7 +49,7 @@ typedef struct
 	SOCKET sftpClient;
 	WSADATA sftpClientData;
 	SOCKADDR_IN saftpClient;
-	char clientRecvBuf[100];
+	char clientRecvBuf[512];
 	HANDLE hFTPClientThread;
 	BOOL bKillFTPClientThread;
 
@@ -43,6 +59,7 @@ typedef struct
 	SOCKADDR_IN saftpSerives;
 	SOCKADDR_IN remoteSerives;
 	char SerivesRecvBuf[100];
+
 	HANDLE hFTPSeriversThread;
 	BOOL bKillFTPSeriversThread;
 	
@@ -83,7 +100,7 @@ void fptSend(SOCKET ssocket,const char *p,UINT16 len)
 ***************************************************************************************************************************/
 void fptCmdSend(const char *p,UINT16 len)
 {
-	printf("\r\n fptCmd  %s ",p);
+	printf("\r\n fptCmd:%s ",p);
 	fptSend(pftpInfo->sftpClient,p,len);
 }
 /*************************************************************************************************************************
@@ -94,7 +111,7 @@ void fptCmdSend(const char *p,UINT16 len)
 *************************************************************************************************************************/
 DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 {
-	int ret;
+	int ret,err;
 	pftpInfo->sftpSerives = socket(AF_INET,SOCK_STREAM,0);
 	if(INVALID_SOCKET == pftpInfo->sftpSerives)
 	{
@@ -102,8 +119,20 @@ DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 		WSACleanup();
 	}
 	pftpInfo->saftpSerives.sin_family = AF_INET;
-	pftpInfo->saftpSerives.sin_addr.S_un.S_addr = inet_addr("192.168.8.209");
-	pftpInfo->saftpSerives.sin_port =  htons(54301);
+	pftpInfo->saftpSerives.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");//pftpInfo->net_ip;//inet_addr("192.168.8.209");
+	pftpInfo->saftpSerives.sin_port = htons(pftpInfo->port);
+#if (FTP_PASV == FTP_WHAT)
+	err = connect(pftpInfo->sftpSerives,(SOCKADDR *)&pftpInfo->saftpSerives,sizeof(SOCKADDR));
+	if (SOCKET_ERROR == err)
+	{
+		printf("connect() failed!\n");
+		closesocket(pftpInfo->sftpSerives); //关闭套接字
+		WSACleanup();
+		return 0;
+	}
+	fptCmdSend(CMD_MLSD,strlen(CMD_MLSD));	
+	pftpInfo->status = eMLSD;
+#elif(FTP_PORT == FTP_WHAT)
 	if(INVALID_SOCKET == bind(pftpInfo->sftpSerives,(SOCKADDR *)&pftpInfo->saftpSerives,sizeof(pftpInfo->saftpSerives)))
 	{
 		printf("\r\n sftpSerives Tell the user that bind INVALID_SOCKET ");
@@ -111,19 +140,26 @@ DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 	listen(pftpInfo->sftpSerives,8);
 	int addrlen = sizeof(pftpInfo->remoteSerives);
 	pftpInfo->sftpNewSerives = accept(pftpInfo->sftpSerives,(SOCKADDR *)&pftpInfo->remoteSerives,&addrlen);
+	if(INVALID_SOCKET == pftpInfo->sftpNewSerives)
+	{
+		printf("\r\n sftpSerives Tell the user that accept INVALID_SOCKET ");
+	}
+#endif
+	
 	while(!pftpInfo->bKillFTPSeriversThread)
 	{
-		
-		
-		if(INVALID_SOCKET == pftpInfo->sftpNewSerives)
-		{
-			printf("\r\n sftpSerives Tell the user that accept INVALID_SOCKET ");
-		}
 		memset(pftpInfo->SerivesRecvBuf,'\0',sizeof(pftpInfo->SerivesRecvBuf));
+#if (FTP_PASV == FTP_WHAT)
+		ret = recv(pftpInfo->sftpSerives,pftpInfo->SerivesRecvBuf,sizeof(pftpInfo->SerivesRecvBuf) - 1,0);
+#elif(FTP_PORT == FTP_WHAT)
 		ret = recv(pftpInfo->sftpNewSerives,pftpInfo->SerivesRecvBuf,sizeof(pftpInfo->SerivesRecvBuf) - 1,0);
+#endif
+		
 		if(INVALID_SOCKET == ret)
 		{
-			printf("\r\n sftpSerives Tell the user that accept INVALID_SOCKET ");
+			DWORD dwErr;
+			dwErr = GetLastError();
+			printf("\r\n sftpSerives Tell the user that recv INVALID_SOCKET %d ",dwErr);
 			pftpInfo->bKillFTPSeriversThread = TRUE;
 		}
 		else
@@ -141,12 +177,59 @@ DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 	return 0;
 }
 /*************************************************************************************************************************
+**函数名称：	getSocketMsg
+**函数功能:
+**入口参数:
+**返回参数:
+*************************************************************************************************************************/
+void getSocketMsg(char *p,UINT16 len)
+{
+	UINT16 i;
+	BYTE cnt = 0;
+	BYTE cnt1 = 0;
+	BYTE cdata[6];
+	char ch[5];
+	memset(ch,'\0',sizeof(ch));	
+
+	for (i = 0;i < len;i++)
+	{
+		if((' ' == p[i]) || ('.' == p[i]) || (',' == p[i])|| ('\r' == p[i])|| ('\n' == p[i]))
+		{
+			if (cnt)
+			{
+				cnt = 0;
+				cdata[cnt1] =  atol(ch);
+				printf("\r\n data %d ",cdata[cnt1]);
+				cnt1 = (cnt1 + 1) % sizeof(cdata);
+				memset(ch,'\0',sizeof(ch));	
+			}
+		}
+		else if((p[i] >= '0') && (p[i] <= '9'))
+		{
+			ch[cnt] = p[i];
+			cnt = (cnt + 1) % sizeof(ch);
+		}
+	}
+
+	pftpInfo->net_ip = (cdata[3] << 24) | (cdata[2] << 16) |(cdata[1] << 8) |(cdata[0] << 0);
+	pftpInfo->port = (cdata[4] << 8) | (UINT16) cdata[5];
+	printf("\r\n net_ip %u  port %u",pftpInfo->net_ip,pftpInfo->port);
+
+
+	
+	pftpInfo->hFTPSeriversThread = CreateThread(NULL,0,ThreadFTPSeriversFunc,NULL,0,NULL);
+	if(NULL == pftpInfo->hFTPSeriversThread)
+	{
+		printf("\r\n CreateThread hFTPSeriversThread Fail");
+	}		
+}
+/*************************************************************************************************************************
 **函数名称：	fptClientProcess
 **函数功能:
 **入口参数:
 **返回参数:
 *************************************************************************************************************************/
-void fptClientProcess(const char *p,UINT16 len)
+void fptClientProcess(char *p,UINT16 len)
 {
 	printf("\r\n Process: %s ",p);
 	switch(pftpInfo->status)
@@ -164,21 +247,53 @@ void fptClientProcess(const char *p,UINT16 len)
 							pftpInfo->status = ePASS;
 						}
 						break;
-
+		
 		case ePASS:		if (!memcmp(p,"230",strlen("230")))
+						{
+							fptCmdSend(CMD_SYST,strlen(CMD_SYST));
+							pftpInfo->status = eSYST;
+						}
+						break;
+
+		case eSYST:		if (!memcmp(p,"215",strlen("215")))
+						{
+							fptCmdSend(CMD_FEAT,strlen(CMD_FEAT));
+							pftpInfo->status = eFEAT;
+						}
+						break;
+
+		case eFEAT:		if(!memcmp(p,"211",strlen("211")))
 						{
 							fptCmdSend(CMD_PWD,strlen(CMD_PWD));
 							pftpInfo->status = ePWD;
-							printf("\r\n listen 192.168.8.209 212,29 port 54301");
-							pftpInfo->hFTPSeriversThread = CreateThread(NULL,0,ThreadFTPSeriversFunc,NULL,0,NULL);
-							if(NULL == pftpInfo->hFTPSeriversThread)
-							{
-								printf("\r\n CreateThread hFTPSeriversThread Fail");
-							}						
 						}
 						break;
-		case ePWD:		fptCmdSend(CMD_PORT,strlen(CMD_PORT));
-						pftpInfo->status = ePORT;
+	
+		case ePWD:		fptCmdSend(CMD_TYPE,strlen(CMD_TYPE));
+						pftpInfo->status = eTYPE;
+						break;
+
+
+
+		case eTYPE:		if(!memcmp(p,"200",strlen("200")))
+						{
+							fptCmdSend(CMD_PASV,strlen(CMD_PASV));	
+							pftpInfo->status = ePASV;
+						}	
+						break;
+			
+		
+		case ePASV:		if(!memcmp(p,"227",strlen("227")))
+						{
+							getSocketMsg(&p[3],len - 3);
+							
+						}	
+						break;
+
+		case eMLSD:		if(!memcmp(p,"226",strlen("226")))
+						{
+							printf("\r\n Retrieving directory listing");
+						}
 						break;
 
 		case ePORT:		fptCmdSend(CMD_LIST,strlen(CMD_LIST));
@@ -226,7 +341,7 @@ DWORD WINAPI ThreadFTPClientFunc(LPVOID arg)
 		return 0;
 	}
 	pftpInfo->saftpClient.sin_family = AF_INET;
-	pftpInfo->saftpClient.sin_addr.S_un.S_addr = inet_addr("192.168.8.7");
+	pftpInfo->saftpClient.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
 	pftpInfo->saftpClient.sin_port =  htons(21);
 
 	err = connect(pftpInfo->sftpClient,(SOCKADDR *)&pftpInfo->saftpClient,sizeof(SOCKADDR));
