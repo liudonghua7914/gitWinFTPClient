@@ -10,10 +10,11 @@
 #define  CMD_PASS	"PASS \r\n"
 #define	 CMD_PORT	"PROT 192.168.8.209 212,29\r\n"	//"PORT \r\n"
 #define  CMD_LIST	"LIST \r\n"
+#define  CMD_NLST	"NLST \r\n"
 #define  CMD_PWD	"PWD \r\n"
 #define  CMD_SYST	"SYST \r\n"
 #define  CMD_FEAT	"FEAT \r\n"
-#define  CMD_TYPE	"TYPE A \r\n"
+#define  CMD_TYPE	"TYPE I \r\n"
 #define  CMD_PASV	"PASV \r\n"
 #define  CMD_MLSD	"MLSD \r\n"
 
@@ -37,6 +38,7 @@ enum FTP_STATUS
 	eLOGIN,
 	ePORT,
 	eLIST,
+	eIDLE,
 	eMAX
 };
 
@@ -112,6 +114,7 @@ void fptCmdSend(const char *p,UINT16 len)
 DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 {
 	int ret,err;
+	UINT i;
 	pftpInfo->sftpSerives = socket(AF_INET,SOCK_STREAM,0);
 	if(INVALID_SOCKET == pftpInfo->sftpSerives)
 	{
@@ -130,8 +133,8 @@ DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 		WSACleanup();
 		return 0;
 	}
-	fptCmdSend(CMD_MLSD,strlen(CMD_MLSD));	
-	pftpInfo->status = eMLSD;
+	fptCmdSend(CMD_MLSD,strlen(CMD_MLSD));	//CMD_MLSD
+	pftpInfo->status = eMLSD;//eMLSD;
 #elif(FTP_PORT == FTP_WHAT)
 	if(INVALID_SOCKET == bind(pftpInfo->sftpSerives,(SOCKADDR *)&pftpInfo->saftpSerives,sizeof(pftpInfo->saftpSerives)))
 	{
@@ -166,7 +169,11 @@ DWORD WINAPI ThreadFTPSeriversFunc(LPVOID arg)
 		{
 			if(ret > 0)
 			{
-				printf("sftpSerives rev:  %s ",pftpInfo->SerivesRecvBuf);
+				printf("\r\n sftpSerives rev:  %s ",pftpInfo->SerivesRecvBuf);
+				for (i = 0;i < ret;i++)
+				{
+					printf("%x ",pftpInfo->SerivesRecvBuf[i]);
+				}
 			}
 		}
 	}
@@ -229,53 +236,88 @@ void getSocketMsg(char *p,UINT16 len)
 **入口参数:
 **返回参数:
 *************************************************************************************************************************/
+BOOL findStrCmd(char *p,UINT16 len,char *q)
+{
+	UINT16 i,j;
+	char *pt = p;
+	char *qt = q;
+	UINT16 qtlen = strlen(qt);
+
+	/*printf("\r\n findStrCmd: ");
+	for (i = 0;i < len;i++)
+	{
+	printf("%x ",p[i]);
+	}*/
+	for (i = 0;i < len;i++)
+	{
+		if (qt[0] == pt[i])
+		{
+			if(!memcmp(&pt[i],qt,qtlen))
+			{
+				return TRUE;
+			}
+		}
+	}
+	return FALSE;
+}
+/*************************************************************************************************************************
+**函数名称：	fptClientProcess
+**函数功能:
+**入口参数:
+**返回参数:
+*************************************************************************************************************************/
 void fptClientProcess(char *p,UINT16 len)
 {
+	char *pt;
 	printf("\r\n Process: %s ",p);
+
 	switch(pftpInfo->status)
 	{
-		case eSTAT:		if (!memcmp(p,"220",strlen("220")))
+	case eSTAT:			if (findStrCmd(p,len,"220"))
 						{
 							fptCmdSend(CMD_USER,strlen(CMD_USER));
 							pftpInfo->status = eUSER;
-						}
+						}				
 						break;
 
-		case eUSER:		if (!memcmp(p,"331",strlen("331")))
+		case eUSER:		if (findStrCmd(p,len,"331"))
 						{
 							fptCmdSend(CMD_PASS,strlen(CMD_PASS));
 							pftpInfo->status = ePASS;
 						}
 						break;
 		
-		case ePASS:		if (!memcmp(p,"230",strlen("230")))
+		case ePASS:		if (findStrCmd(p,len,"230"))
 						{
 							fptCmdSend(CMD_SYST,strlen(CMD_SYST));
 							pftpInfo->status = eSYST;
 						}
 						break;
 
-		case eSYST:		if (!memcmp(p,"215",strlen("215")))
+		case eSYST:		if (findStrCmd(p,len,"215"))
 						{
 							fptCmdSend(CMD_FEAT,strlen(CMD_FEAT));
 							pftpInfo->status = eFEAT;
 						}
 						break;
 
-		case eFEAT:		if(!memcmp(p,"211",strlen("211")))
+		case eFEAT:		if (findStrCmd(p,len,"211 End"))
 						{
 							fptCmdSend(CMD_PWD,strlen(CMD_PWD));
 							pftpInfo->status = ePWD;
 						}
 						break;
 	
-		case ePWD:		fptCmdSend(CMD_TYPE,strlen(CMD_TYPE));
-						pftpInfo->status = eTYPE;
+		case ePWD:		if (findStrCmd(p,len,"257"))
+						{
+							fptCmdSend(CMD_TYPE,strlen(CMD_TYPE));
+							pftpInfo->status = eTYPE;
+						}	
 						break;
 
 
 
-		case eTYPE:		if(!memcmp(p,"200",strlen("200")))
+		case eTYPE:		if (findStrCmd(p,len,"200"))
 						{
 							fptCmdSend(CMD_PASV,strlen(CMD_PASV));	
 							pftpInfo->status = ePASV;
@@ -283,16 +325,17 @@ void fptClientProcess(char *p,UINT16 len)
 						break;
 			
 		
-		case ePASV:		if(!memcmp(p,"227",strlen("227")))
+		case ePASV:		if (findStrCmd(p,len,"227"))
 						{
 							getSocketMsg(&p[3],len - 3);
 							
 						}	
 						break;
 
-		case eMLSD:		if(!memcmp(p,"226",strlen("226")))
+		case eMLSD:		if (findStrCmd(p,len,"226"))
 						{
 							printf("\r\n Retrieving directory listing");
+							pftpInfo->status = eMAX;
 						}
 						break;
 
@@ -301,6 +344,7 @@ void fptClientProcess(char *p,UINT16 len)
 						break;
 		case eLIST:		
 						pftpInfo->status = eMAX;
+		
 						break;
 		default:
 						break;
